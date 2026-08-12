@@ -7,6 +7,8 @@
 
 ---
 
+# Part 1: Product Requirements
+
 ## 1. Overview
 
 Support teams have agents who work different hours, on different days, and in different timezones.
@@ -130,7 +132,8 @@ Each ticket has:
 * Status (Open, In Progress, Resolved, Closed).
 * Estimated effort (derived from configured priority settings).
 * Assignee (empty if unassigned).
-* Assignment timestamp.
+* Assignment timestamp (`assigned_at` - when the system made the decision).
+* Target shift start (`target_shift_start` - when the system expects the work to begin, crucial for look-ahead assignments).
 * Assignment reason.
 
 #### Assignment Engine
@@ -198,7 +201,7 @@ The table below lists the decisions made for this version of the product. These 
 | Ticket handling | Every agent can handle every ticket |
 | Fairness (short term) | Projected utilization after assignment |
 | Fairness (long term) | Rolling utilization over available working days (not calendar days) |
-| Rolling window | Previous 30 available working days per agent |
+| Rolling window | Previous 30 available working days per agent. (An *available working day* is a calendar date on which the agent has at least one scheduled availability block AND the date is a company workday). |
 | Tickets | Assumed to be pre-created with company, priority, and status set; the API consumes them |
 | P1 override | P1 does not override capacity or availability rules |
 | Already-assigned tickets | If a ticket already has an assignment, the API returns the existing assignment without creating a new one |
@@ -347,6 +350,8 @@ For example, if Ananya only has 3 hours of effective remaining capacity, she can
 
 ---
 
+# Part 2: Assignment Algorithm
+
 ## 11. Capacity
 
 ### Definition
@@ -387,15 +392,17 @@ Active workload is the estimated effort of all tickets the agent is currently wo
 
 ### Weekly Workload
 
-Weekly workload is the total estimated effort of all tickets assigned to the agent during the current planning week, regardless of their current status.
+Weekly workload is the total estimated effort of all tickets whose `target_shift_start` falls into the specific planning week being evaluated, regardless of their current status.
 
-* **Agent:** Ananya (current planning week)
-* **Assigned this week:**
-  * Ticket #101: P1 (8h) (still open)
-  * Ticket #099: P2 (4h) (resolved yesterday)
-* **Weekly workload:** 12h
+* **Agent:** Ananya (Evaluating Week 2 Capacity)
+* **Assigned to Week 2:**
+  * Ticket #101: P1 (8h) (Assigned yesterday via look-ahead for Monday morning)
+  * Ticket #099: P2 (4h) (Assigned today for Tuesday)
+* **Weekly workload for Week 2:** 12h
 
-Resolved tickets no longer count toward active workload, but they still count toward weekly workload and historical records. The work happened, so it should remain part of the fairness calculation.
+By scoping workload to the `target_shift_start` rather than the exact moment the ticket arrived, the system natively handles **look-ahead reservations**. A ticket assigned on a Saturday for a Monday shift immediately consumes capacity from Monday's week, leaving Saturday's week completely untouched.
+
+Resolved tickets no longer count toward active workload, but they still count toward weekly workload. The work happened, so it should remain part of the fairness calculation.
 
 ### Ticket Status and Workload
 
@@ -413,7 +420,7 @@ Resolved tickets no longer count toward active workload, but they still count to
 ### Weekly Remaining Capacity
 
 ```
-Remaining weekly capacity = weekly capacity - weekly workload
+Remaining weekly capacity = weekly capacity - weekly workload (for the evaluated week)
 ```
 
 Example:
@@ -673,7 +680,7 @@ When multiple candidates are ranked at any tier, ties are resolved in this order
 
 1. **Lowest projected utilization** (evaluated with a 10% threshold). If candidates are within 10% of each other, they are considered tied. This prevents insignificant short-term differences from overriding massive long-term workload imbalances.
 2. **Lowest rolling utilization** (30 available days).
-3. **Least recently assigned a ticket.**
+3. **Least recently assigned a ticket** (based on `last_assigned_at`, the global timestamp of the most recent ticket assignment to the agent, regardless of ticket status or planning week).
 4. **Deterministic tie-break** based on agent ID (alphabetical sort).
 
 ---
@@ -985,6 +992,8 @@ Each day can have a different start and end time. One block per day is supported
 | Ticket is resolved or closed | Remove its effort from active workload. Retain it in weekly workload and rolling utilization history. |
 
 ---
+
+# Part 3: Technical Constraints
 
 ## 28. Non-Functional Requirements
 
