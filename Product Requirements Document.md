@@ -2,162 +2,156 @@
 # Support Ticket Assignment
 
 **Status:** Draft  
-**Version:** 1.1
+**Version:** 1.2
 **Last Updated:** 12 August 2026
 
 ---
 
 ## 1. Overview
 
-Support teams typically consist of agents working varied hours, days, and timezones. Currently, team leads manually monitor the ticket queue and assign incoming tickets. While this works for small teams, it becomes unmanageable as the team scales.
+Support agents work across different hours, days, and timezones. When team leads manually route tickets, the process slows down as the team grows.
 
-This product aims to fully automate the assignment of new support tickets to the appropriate available agents. It is designed to balance two competing priorities:
-1. **Availability (Rapid Response):** Ensuring tickets are assigned to someone who can start working on them as soon as possible.
-2. **Fairness (Workload Balance):** Ensuring that no agent is overwhelmed and that work is distributed equitably based on individual capacity.
-
-The system will give team leads full visibility into team coverage, capacity constraints, and assignment rationale.
+This product automatically assigns incoming tickets to available agents. It prioritizes quick responses by choosing agents who are working now, while keeping workloads balanced across the team based on capacity.
 
 ---
 
 ## 2. Problem Statement
 
-The manual assignment process results in several critical issues:
-* Tickets sit unassigned when the team lead is unavailable.
-* Team leads spend excessive time triaging tickets instead of focusing on higher-level management.
-* Workload distribution is often uneven; some agents are overloaded while others sit idle.
-* Agents in different timezones may be assigned work outside their active hours.
-* Simple round-robin systems fail to account for agents with different weekly capacities or those who have historically carried a heavier load.
-* There is no historical record explaining *why* a ticket was assigned to a specific agent.
+Manual assignment causes several operational problems:
+* Tickets sit unassigned when team leads are offline or busy.
+* Team leads spend hours triaging instead of managing the team.
+* Workload is uneven, leaving some agents overwhelmed while others have light queues.
+* Off-hours assignments send tickets to agents outside their working shifts.
+* Round-robin assignment ignores differences in weekly capacity and past workload.
+* Teams lack a record explaining why specific agents received tickets.
+
+---
 
 ## 3. Goals & Success Criteria
 
 ### Primary Goals
-1. **Automate Assignment:** Automatically route new tickets to an eligible working agent.
-2. **Intelligent Look-Ahead:** If no one is currently working, intelligently look ahead (up to 7 days) and assign the ticket to the earliest scheduled agent with sufficient capacity.
-3. **Respect Capacity:** Never assign a ticket if it exceeds the agent's remaining capacity in the target planning week.
-4. **Ensure Fairness:** Distribute work based on proportional capacity (short-term) and historical workload (long-term).
-5. **Transparency:** Provide a plain-language explanation for every assignment decision.
+1. Automatically route tickets to available working agents.
+2. Route off-hours tickets to the earliest scheduled agent with available capacity (up to 7 days ahead).
+3. Enforce weekly capacity limits so agents are not overassigned.
+4. Balance work using short-term capacity percentages and long-term history.
+5. Provide clear text explanations for every assignment decision.
 
 ### Success Criteria
-* 100% of eligible tickets are automatically assigned; tickets with no eligible agent remain unassigned with a clear reason.
-* Off-hours tickets are correctly queued to the agent starting work the earliest.
-* Agents report a more balanced workload, and no agent exceeds their defined weekly capacity.
-* The team lead dashboard accurately surfaces coverage gaps and unassigned tickets in real-time.
+* Automatically assign every ticket for which an eligible agent exists within the next 7 days; otherwise leave it unassigned with a clear reason.
+* Off-hours tickets queue to the agent starting work earliest.
+* The dashboard shows coverage gaps and unassigned tickets in real time.
 
 ---
 
 ## 4. Target Users
 
 ### Team Lead
-The primary user of the management UI. Their responsibilities include:
-* Managing agent profiles, timezones, and weekly availability schedules.
-* Configuring global company settings (workdays, default ticket effort estimates).
-* Monitoring the real-time coverage dashboard to identify capacity bottlenecks.
-* Reviewing unassigned tickets and understanding the system's assignment logic.
+Manages team setup and monitors routing. Responsibilities include:
+* Setting up agent schedules, timezones, and weekly capacity limits.
+* Configuring company workdays, company timezone, and default ticket effort estimates.
+* Monitoring real-time team coverage and capacity bottlenecks.
+* Reviewing unassigned tickets and assignment reasons.
 
 ### Support Agent
-The end-user who receives and resolves tickets. 
-* They have defined timezones, availability blocks, and maximum weekly ticket capacities.
-* They interact with the tickets but do not configure the assignment engine directly.
+Receives and resolves tickets.
+* Has a set timezone, work schedule, and weekly capacity.
+* Does not configure routing rules directly.
 
 ---
 
 ## 5. Scope
 
 ### In Scope
-* **Company Settings:** Definition of company workdays, timezones, and default ticket efforts (e.g., P1 = 8 hours, P4 = 1 hour).
-* **Agent Management:** Configuration of individual agent timezones, daily availability windows (one block per day), and total weekly ticket capacity (in hours).
-* **Assignment Engine:** The core algorithm that evaluates agent eligibility and selects the optimal candidate.
-* **Coverage Dashboard:** Real-time visibility into who is working, available capacity by priority, and unassigned ticket queues.
+* **Company Settings:** Workday schedule, company timezone (for dashboard display and company workday interpretation), and effort estimates by priority (for example: P1 = 8h, P4 = 1h).
+* **Agent Management:** Timezones, daily shift schedules (one block per day), and weekly capacity limits (in hours).
+* **Assignment Engine:** Rules that evaluate availability and capacity to pick the best agent.
+* **Coverage Dashboard:** Real-time view of active agents, priority capacity, and unassigned tickets.
 
 ### Out of Scope
-* Authentication and role-based access control.
-* Multiple availability blocks per day (split shifts).
-* Holiday calendars and PTO tracking.
-* Agent skill-based routing or AI ticket classification.
-* Multiple support teams within a single company.
+* Authentication and user roles.
+* Split shifts (multiple availability blocks per day).
+* Holidays and PTO calendars.
+* Skill-based routing and AI classification.
+* Support for multiple teams per company.
 
 ---
 
 ## 6. Assumptions
 
-To keep the initial version focused, the following product decisions and assumptions have been made:
-* **One Team per Company:** A company has only one global support team pool.
-* **Universal Capability:** Every agent is assumed to be capable of handling every ticket (no domain or skill-based routing).
-* **Single Availability Block:** Agents work a single contiguous block of time per day.
-* **Fixed Ticket Effort:** Ticket effort is strictly derived from its global priority setting. Individual tickets cannot have custom effort values.
-* **No Rules Overrides:** High-priority tickets (e.g., P1) cannot override an agent's maximum capacity limits or availability schedules.
-* **External Ticket Creation:** The system assumes tickets are created upstream and fed into this assignment engine with their priority already defined.
+* **Single Team:** Each company has one support team pool.
+* **Equal Capabilities:** All agents can take any ticket.
+* **Contiguous Shifts:** Agents work one block of time per day.
+* **Fixed Effort:** Ticket effort depends only on its priority setting.
+* **Strict Limits:** High priority tickets do not bypass capacity limits or shift hours.
+* **Pre-Categorized Tickets:** Incoming tickets arrive with priority already set.
 
 ---
 
 ## 7. Assignment Model
 
 ### 7.1 Availability & Timezones
-Agents define schedules in their local IANA timezone. The system converts schedules to UTC for consistent availability and look-ahead calculations, including DST and overnight shifts. The weekly planning budget resets at Monday 00:00 in each agent's local timezone to avoid mid-shift capacity resets across global teams.
+Agents set schedules in their local IANA timezone. The engine converts schedules to UTC to handle overnight shifts and daylight saving changes. Weekly planning budgets reset at Monday 00:00 in each agent's local timezone. The company timezone is used to define company-wide workday boundaries and present real-time coverage on the dashboard.
 
 ### 7.2 Ticket Priority & Effort
-Every ticket priority is mapped to a configurable effort estimate (in hours). For example, a P1 ticket might cost 8 hours of capacity, while a P3 ticket costs 2 hours. This effort is directly deducted from the agent's available capacity when assigned.
+Each priority maps to an estimated effort in hours (for example: P1 = 8h, P3 = 2h). When assigned, this effort deducts from the agent's weekly budget for the target planning week. Ticket effort represents a budget allocation and does not require an agent to complete the entire ticket within a single shift.
 
 ### 7.3 Capacity & Workload
-* **Weekly Capacity:** The maximum number of hours an agent is expected to spend on ticket work per week.
-* **Effective Remaining Capacity:** The system calculates the lesser of an agent's remaining weekly capacity and the actual time-supported hours left in their scheduled shifts. For Tier 1 immediate assignment, an agent's effective remaining capacity must be greater than or equal to the ticket's effort; otherwise, the ticket falls back to look-ahead tiers.
+* **Weekly Capacity:** Maximum hours an agent can spend on tickets per week.
+* **Effective Remaining Capacity:** The lower value between remaining weekly capacity and remaining shift hours. For Tier 1 immediate assignment, an agent must have enough effective capacity to cover the ticket effort; otherwise, the ticket shifts to look-ahead routing.
 
 ### 7.4 Fairness Metrics
-The system does not just count tickets; it calculates utilization percentages to account for agents with different capacities.
-* **Projected Utilization (Short-Term):** Measures how loaded an agent will be if they take the incoming ticket.
-* **Rolling Utilization (Long-Term):** Measures workload over the past 30 available working days to prevent repeatedly assigning disproportionate workload to the same agents.
+The engine uses percentages rather than raw ticket counts to compare agents fairly:
+* **Projected Utilization (Short-Term):** Expected workload percentage after taking the ticket.
+* **Rolling Utilization (Long-Term):** Workload percentage over the agent's last 30 available working days.
 
 ---
 
 ## 8. Assignment Logic
 
-The system prioritizes **Availability** over **Fairness**. It wants to get the ticket to someone as fast as possible, but will distribute it fairly among those who are available. 
+Availability determines the assignment tier. Within the same availability tier, fairness determines the assignee.
 
-The assignment engine operates in a tiered structure:
+Routing proceeds through three tiers:
 
 1. **Tier 1 (Immediate Active Assignment):** 
-   * The system checks all agents currently working.
-   * Filters out anyone without enough *Effective Remaining Capacity*.
-   * If multiple agents are eligible, it selects the agent with the lowest **Projected Utilization**.
-   * If projected utilization differs by no more than 10 percentage points, candidates are considered tied, it falls back to the agent with the lowest **Rolling Utilization**.
+   * Check agents currently on shift.
+   * Filter out agents without enough Effective Remaining Capacity.
+   * Select the eligible agent with the lowest Projected Utilization.
+   * If candidate Projected Utilization values are within 10 percentage points of one another, compare their Rolling Utilization and select the candidate with the lower value.
 
-2. **Tier 2 (Current Week Look-Ahead):** 
-   * If no eligible agents are currently working, the system looks ahead at the remaining shifts in the current week.
-   * It assigns the ticket to the eligible agent whose shift starts the earliest. 
+2. **Tier 2 (7-Day Look-Ahead):** 
+   * If no active agent is eligible, evaluate upcoming shifts over the next 7 days.
+   * Assign to the eligible agent whose shift starts earliest.
+   * If multiple eligible agents share the same earliest shift start, use Projected Utilization and Rolling Utilization to select between them.
 
-3. **Tier 3 (7-Day Look-Ahead):** 
-   * If no one can take it this week, the search expands up to 7 days into the future, picking the earliest eligible shift.
+3. **Tier 3 (Unassigned):** 
+   * If no agent has an eligible working shift and sufficient capacity within the next 7 days, leave the ticket unassigned with a recorded reason.
 
-4. **Tier 4 (Unassigned):** 
-   * If the team is completely at capacity for the next 7 days, the system halts. The ticket is marked as **Unassigned** and flagged for the Team Lead.
-
-*Note: Once a ticket is assigned, the assignment is sticky. The system will not automatically re-assign tickets if an agent's schedule changes.*
+Changes to schedules, timezones, or weekly capacity affect future assignments only. Existing assignments remain unchanged.
 
 ---
 
 ## 9. User Interface & Views
 
 ### Coverage Dashboard
-A real-time overview for the Team Lead that displays:
-* How many agents are currently scheduled vs. actively available.
-* A breakdown of available capacity (e.g., "3 agents can take a P2 ticket, but no agents have capacity for a P1 ticket").
-* Clear warnings if the team is approaching maximum utilization.
+Shows current coverage state:
+* Active vs. scheduled agents.
+* Available capacity by ticket priority.
+* Warnings when capacity is low or exhausted.
 
 ### Unassigned Tickets Panel
-A dedicated view for tickets that the system could not route. Crucially, each ticket displays the plain-language reason generated by the system (e.g., *"Unassigned: All active and upcoming shifts for the next 7 days lack sufficient capacity to absorb 8h of effort."*)
+Lists unassigned tickets alongside the specific reason recorded by the engine.
 
 ---
 
 ## 10. Non-Functional Requirements
 
-* **Determinism:** The assignment engine must be fully deterministic. Given the same inputs, it must yield the same assignee. Ties are broken alphabetically by Agent ID as a last resort.
-* **Concurrency:** The system must utilize database locks or transactions to prevent race conditions where a single ticket is assigned to multiple agents.
-* **Explainability:** The algorithm must never be a "black box." Every decision must yield a clear, human-readable justification.
+* **Determinism:** Given identical inputs, the engine returns the same result. Ties break alphabetically by Agent ID as a last resort.
+* **Concurrency:** Database locks prevent assigning the same ticket twice.
+* **Explainability:** Every assignment decision records a plain-text reason.
 
 ---
 
 ## 11. Future Improvements
-* Allow Team Leads to initiate an "Emergency P1 Override" to bypass capacity rules.
-* Implement PTO integration and Holiday calendars.
-* Support split shifts and multiple availability blocks per day.
+* Emergency manual overrides for critical tickets.
+* PTO and holiday calendar integration.
+* Split-shift schedule support.
