@@ -97,6 +97,9 @@ Each priority maps to an estimated effort in hours (for example: P1 = 8h, P3 = 2
 
 ### 7.3 Capacity & Workload
 * **Weekly Capacity:** Maximum hours an agent can spend on tickets per week.
+* **Weekly Workload:** Sum of estimated effort (in hours) of all tickets assigned to the agent for the target planning week (regardless of status).
+* **Remaining Weekly Budget:** Hours left in the agent's weekly ticket capacity:
+  $$\text{Remaining Weekly Budget} = \text{Weekly Ticket Capacity} - \text{Weekly Workload}$$
 * **Capacity Rate:** The proportion of scheduled shift hours dedicated to ticket work:
   $$\text{Capacity Rate} = \frac{\text{Weekly Ticket Capacity}}{\text{Total Scheduled Availability Hours}}$$
   If total scheduled hours or ticket capacity is 0, Capacity Rate is 0.
