@@ -133,7 +133,7 @@ Each ticket has:
 * Estimated effort (derived from configured priority settings).
 * Assignee (empty if unassigned).
 * Assignment timestamp (`assigned_at` - when the system made the decision).
-* Target shift start (`target_shift_start` - when the system expects the work to begin, crucial for look-ahead assignments).
+* Target shift start (`target_shift_start` - when the system expects the work to begin, crucial for look-ahead assignments. For immediate Tier 1 assignments, this is exactly equal to `assigned_at`).
 * Assignment reason.
 
 #### Assignment Engine
@@ -213,7 +213,7 @@ This system makes an explicit product decision to prioritize **Availability (Ear
 * **If we prioritized Fairness:** The system would evaluate all agents across the entire week and assign the ticket to the absolute least loaded agent. This would perfectly balance the workload, but if that least loaded agent doesn't start their next shift until three days later, the ticket sits untouched for three days.
 * **Because we prioritize Availability:** The system greedily assigns tickets to the agent working *earliest* (or currently active). This means if only one agent is working on a Sunday night, they will absorb all tickets until their capacity is full, even if agents logging in on Monday morning have zero workload. 
 
-Fairness metrics are only used as a tie-breaker when multiple agents are available at the exact same time.
+Availability determines the assignment tier. Within the active tier, fairness determines which eligible agent should receive the ticket. For look-ahead tiers, earliest shift start takes precedence, and fairness is used only when multiple eligible agents have the same earliest shift start.
 
 ---
 
@@ -383,6 +383,8 @@ This is expected and fair. An agent with a higher capacity can handle more absol
 ### Active Workload
 
 Active workload is the estimated effort of all tickets the agent is currently working on (status is Open or In Progress).
+
+> **Important:** Active workload is a visibility metric, not a capacity-budget metric. A ticket consumes capacity *only* in the planning week associated with its `target_shift_start`. If a ticket remains open in subsequent weeks, its remaining effort does not automatically consume the next week's capacity, because this system intentionally models fixed assignment estimates rather than tracking remaining-work estimates.
 
 * **Agent:** Ananya
 * **Open tickets:**
@@ -582,6 +584,10 @@ Rolling utilization looks at history to prevent this from happening.
 ### Measured in Available Days, Not Calendar Days
 
 The rolling window covers the **previous 30 available working days for each agent**.
+
+> **Attribution Rule:** For rolling utilization, ticket effort is attributed to the agent's available working day containing the `target_shift_start`. 
+
+This ensures perfect historical consistency: Weekly utilization maps to the target shift *week*, and Rolling utilization maps to the target shift *working day*.
 
 This is important:
 
@@ -868,7 +874,7 @@ Overall status: Partial: cannot handle P1 or P2 tickets right now
 If no agents are working and there are no look-ahead fallback schedules:
 
 ```
-Current Coverage: Sunday, 11 Aug, 10:00 IST
+Current Coverage: Sunday, 9 Aug 2026, 10:00 IST
 
 Agents scheduled today:   0
 No agents are working right now.
