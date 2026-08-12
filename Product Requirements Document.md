@@ -1,8 +1,8 @@
 # Product Requirements Document
 # Support Ticket Assignment
 
-**Status:** Draft  
-**Version:** 1.2
+**Status:** Draft
+**Version:** 1.3
 **Last Updated:** 12 August 2026
 
 ---
@@ -97,12 +97,27 @@ Each priority maps to an estimated effort in hours (for example: P1 = 8h, P3 = 2
 
 ### 7.3 Capacity & Workload
 * **Weekly Capacity:** Maximum hours an agent can spend on tickets per week.
-* **Effective Remaining Capacity:** The lower value between remaining weekly ticket capacity and time-supported remaining capacity, where time-supported capacity is based on the agent's remaining scheduled hours in the planning week and their ticket capacity rate. For Tier 1 immediate assignment, an agent must have enough effective capacity to cover the ticket effort; otherwise, the ticket shifts to look-ahead routing.
+* **Capacity Rate:** The proportion of scheduled shift hours dedicated to ticket work:
+  $$\text{Capacity Rate} = \frac{\text{Weekly Ticket Capacity}}{\text{Total Scheduled Availability Hours}}$$
+  If total scheduled hours or ticket capacity is 0, Capacity Rate is 0.
+* **Time-Supported Remaining Capacity:** Ticket work that fits into the agent's remaining shift hours:
+  $$\text{Time-Supported Remaining Capacity} = \text{Remaining Scheduled Shift Hours} \times \text{Capacity Rate}$$
+* **Effective Remaining Capacity:** The lower value between remaining weekly capacity and time-supported capacity:
+  $$\text{Effective Remaining Capacity} = \min(\text{Remaining Weekly Budget}, \text{Time-Supported Remaining Capacity})$$
+  For Tier 1 immediate assignment, an agent's effective remaining capacity must be greater than or equal to the ticket effort; otherwise, the ticket shifts to look-ahead routing.
+* **Partial and Zero Hours Handling:** Calculations preserve exact fractional hours (for example, 2.5 remaining shift hours at a 0.8 capacity rate yields 2.0 hours of time-supported capacity). If an agent has 0 weekly capacity or 0 scheduled hours, effective capacity is 0, rendering the agent ineligible for assignment.
 
 ### 7.4 Fairness Metrics
-The engine uses percentages rather than raw ticket counts to compare agents fairly:
-* **Projected Utilization (Short-Term):** Expected workload percentage after taking the ticket.
-* **Rolling Utilization (Long-Term):** Workload percentage over the agent's last 30 available working days.
+The engine compares agents using percentage utilization rather than raw ticket counts:
+* **Projected Utilization (Short-Term):** Expected workload percentage after taking the ticket:
+  $$\text{Projected Utilization} = \frac{\text{Weekly Workload} + \text{Ticket Effort}}{\text{Weekly Ticket Capacity}}$$
+* **Rolling Utilization (Long-Term):** Historical workload percentage over the agent's recent working history:
+  $$\text{Rolling Utilization} = \frac{\text{Effort Assigned During Rolling Window}}{\text{Capacity Rate} \times \text{Scheduled Hours During Rolling Window}}$$
+  * **Window Definition:** Evaluates the agent's previous 30 available working days (calendar dates on which the agent is scheduled to work on a company workday).
+  * **History Rules:**
+    * **Fewer than 5 available working days:** Use the team's current rolling utilization average. If the entire team lacks sufficient history, default to 0%.
+    * **5 to 29 available working days:** Calculate using all available working days of history rather than waiting for 30 days.
+    * **30 or more available working days:** Cap the window at the most recent 30 available working days.
 
 ---
 
