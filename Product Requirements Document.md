@@ -33,13 +33,13 @@ The manual assignment process results in several critical issues:
 
 ### Primary Goals
 1. **Automate Assignment:** Automatically route new tickets to an eligible working agent.
-2. **Intelligent Look-Ahead:** If no one is currently working, intelligently look ahead (up to 7 days) and assign the ticket to the earliest scheduled agent.
-3. **Respect Capacity:** Never assign a ticket to an agent if it exceeds their remaining weekly capacity.
+2. **Intelligent Look-Ahead:** If no one is currently working, intelligently look ahead (up to 7 days) and assign the ticket to the earliest scheduled agent with sufficient capacity.
+3. **Respect Capacity:** Never assign a ticket if it exceeds the agent's remaining capacity in the target planning week.
 4. **Ensure Fairness:** Distribute work based on proportional capacity (short-term) and historical workload (long-term).
 5. **Transparency:** Provide a plain-language explanation for every assignment decision.
 
 ### Success Criteria
-* 100% of eligible incoming tickets are routed automatically without human intervention.
+* 100% of eligible tickets are automatically assigned; tickets with no eligible agent remain unassigned with a clear reason.
 * Off-hours tickets are correctly queued to the agent starting work the earliest.
 * Agents report a more balanced workload, and no agent exceeds their defined weekly capacity.
 * The team lead dashboard accurately surfaces coverage gaps and unassigned tickets in real-time.
@@ -91,26 +91,26 @@ To keep the initial version focused, the following product decisions and assumpt
 
 ---
 
-## 7. Core Concepts
+## 7. Assignment Model
 
 ### 7.1 Availability & Timezones
-Agents define their schedule in their local IANA timezone (e.g., `Asia/Kolkata`, `America/New_York`). The system dynamically expands these schedules into UTC intervals to seamlessly handle daylight saving time and overnight shifts.
+Agents define schedules in their local IANA timezone. The system converts schedules to UTC for consistent availability and look-ahead calculations, including DST and overnight shifts. The weekly planning budget resets at Monday 00:00 in each agent's local timezone to avoid mid-shift capacity resets across global teams.
 
 ### 7.2 Ticket Priority & Effort
 Every ticket priority is mapped to a configurable effort estimate (in hours). For example, a P1 ticket might cost 8 hours of capacity, while a P3 ticket costs 2 hours. This effort is directly deducted from the agent's available capacity when assigned.
 
-### 7.3 Capacity vs. Workload
+### 7.3 Capacity & Workload
 * **Weekly Capacity:** The maximum number of hours an agent is expected to spend on ticket work per week.
-* **Effective Remaining Capacity:** The system calculates the lesser of an agent's remaining weekly capacity and the actual hours left in their scheduled shifts to ensure they can physically complete the work.
+* **Effective Remaining Capacity:** The system calculates the lesser of an agent's remaining weekly capacity and the actual time-supported hours left in their scheduled shifts. For Tier 1 immediate assignment, an agent's effective remaining capacity must be greater than or equal to the ticket's effort; otherwise, the ticket falls back to look-ahead tiers.
 
 ### 7.4 Fairness Metrics
 The system does not just count tickets; it calculates utilization percentages to account for agents with different capacities.
 * **Projected Utilization (Short-Term):** Measures how loaded an agent will be if they take the incoming ticket.
-* **Rolling Utilization (Long-Term):** Measures the agent's actual workload over their past 30 available working days to prevent burnout.
+* **Rolling Utilization (Long-Term):** Measures workload over the past 30 available working days to prevent repeatedly assigning disproportionate workload to the same agents.
 
 ---
 
-## 8. Assignment Logic & Algorithm
+## 8. Assignment Logic
 
 The system prioritizes **Availability** over **Fairness**. It wants to get the ticket to someone as fast as possible, but will distribute it fairly among those who are available. 
 
@@ -120,7 +120,7 @@ The assignment engine operates in a tiered structure:
    * The system checks all agents currently working.
    * Filters out anyone without enough *Effective Remaining Capacity*.
    * If multiple agents are eligible, it selects the agent with the lowest **Projected Utilization**.
-   * If there is a tie (within 10%), it falls back to the agent with the lowest **Rolling Utilization**.
+   * If projected utilization differs by no more than 10 percentage points, candidates are considered tied, it falls back to the agent with the lowest **Rolling Utilization**.
 
 2. **Tier 2 (Current Week Look-Ahead):** 
    * If no eligible agents are currently working, the system looks ahead at the remaining shifts in the current week.
