@@ -90,7 +90,7 @@ Receives and resolves tickets.
 ## 7. Assignment Model
 
 ### 7.1 Availability & Timezones
-Agents set schedules in their local IANA timezone. The engine converts schedules to UTC to handle overnight shifts and daylight saving changes. Each agent's weekly capacity is evaluated according to Monday - Sunday in their local timezone. The company timezone is used to define company-wide workday boundaries and present real-time coverage on the dashboard.
+Agents set schedules in their local IANA timezone. The engine expands recurring local schedules into concrete UTC shift intervals `(shift_start_utc, shift_end_utc)` to handle daylight saving changes, cross-midnight shifts, and look-ahead evaluations on a unified UTC timeline. If a shift crosses midnight (for example, Monday 22:00 to Tuesday 06:00 local time), it is expanded as a single continuous shift interval starting at `shift_start_utc`. Each agent's weekly capacity is evaluated according to Monday - Sunday in their local timezone. The company timezone defines company-wide workday boundaries and formats real-time coverage on the dashboard.
 
 ### 7.2 Ticket Priority & Effort
 Each priority maps to an estimated effort in hours (for example: P1 = 8h, P3 = 2h). When assigned, ticket effort is allocated entirely to the planning week of the target shift where work begins:
@@ -130,25 +130,30 @@ The engine compares agents using percentage utilization rather than raw ticket c
 
 ---
 
-## 8. Assignment Logic
+## 8. Assignment logic
 
 Availability determines the assignment tier. Within the same availability tier, fairness determines the assignee.
 
+### Availability vs. Fairness Trade-Off
+The system intentionally prioritizes **Availability (Earliest Response)** over absolute **Fairness**:
+* **Why Availability takes priority:** Evaluating absolute fairness across the entire 7-day window would route tickets to the least-loaded agent even if their next shift starts 3 days later, causing customer tickets to sit unserviced.
+* **How Tiers enforce priority:** Earliest shift start time takes precedence in look-ahead routing. Fairness metrics (Projected and Rolling Utilization) are used to pick among active agents in Tier 1, or as tie-breakers in Tier 2 when multiple eligible agents share the exact same earliest shift start time.
+
 Routing proceeds through three tiers:
 
-1. **Tier 1 (Immediate Active Assignment):** 
+1. **Tier 1 (Immediate active assignment):** 
    * Check agents currently on shift.
    * Filter out agents without enough Effective Remaining Capacity.
    * Select the eligible agent with the lowest Projected Utilization.
    * If the difference between the lowest projected utilization and another candidate is ≤ 10 percentage points, those candidates are considered tied. For tied candidates, compare their Rolling Utilization and select the candidate with the lower value.
 
-2. **Tier 2 (7-Day Look-Ahead):** 
-   * If no active agent is eligible, evaluate upcoming shifts over the next 7 days.
+2. **Tier 2 (7-day look-ahead):** 
+   * If no active agent is eligible, evaluate upcoming shifts starting within the 168-hour UTC look-ahead window (`ticket_created_at_utc` to `ticket_created_at_utc + 168h`).
    * Assign to the eligible agent whose shift starts earliest.
    * If multiple eligible agents share the same earliest shift start, use Projected Utilization and Rolling Utilization to select between them.
 
 3. **Tier 3 (Unassigned):** 
-   * If no agent has an eligible working shift and sufficient capacity within the next 7 days, leave the ticket unassigned with a recorded reason.
+   * If no agent has an eligible working shift and sufficient capacity within the 168-hour look-ahead window, leave the ticket unassigned with a recorded reason.
 
 Changes to schedules, timezones, or weekly capacity affect future assignments only. Existing assignments remain unchanged.
 
@@ -172,7 +177,16 @@ Lists unassigned tickets alongside the specific reason recorded by the engine.
 * **Determinism:** Given identical inputs, the engine returns the same result. Ties break alphabetically by Agent ID as a last resort.
 * **Idempotency:** The `ticket_id` serves as the idempotent request key. Re-delivering or calling the assignment API for an already-assigned `ticket_id` is a no-op that returns the existing assignment details as-is without re-running the assignment algorithm or altering capacity budgets.
 * **Concurrency & Locking:** Assignment operations execute within an isolated database transaction using row-level locking (e.g., `SELECT ... FOR UPDATE` on ticket and assignment records) alongside a database `UNIQUE(ticket_id)` constraint. If multiple workers receive the same `ticket_id` simultaneously, exactly one worker completes the assignment while concurrent requests wait and gracefully return the created assignment via the idempotent no-op path.
-* **Explainability:** Every assignment decision records a plain-text reason.
+* **Explainability and Auditability:** Every assignment decision (whether assigned or unassigned) persists a structured audit record containing both machine-readable metrics and a human-readable text explanation:
+  * `ticket_id`: Unique identifier of the evaluated ticket.
+  * `status`: Outcome of assignment evaluation (`assigned` or `unassigned`).
+  * `assigned_agent_id`: Identifier of selected agent (null if unassigned).
+  * `assigned_agent_name`: Name of selected agent (null if unassigned).
+  * `assigned_at`: UTC timestamp when assignment decision was recorded.
+  * `target_shift_start`: UTC timestamp when work is scheduled to begin (equals `assigned_at` for Tier 1 active assignments).
+  * `assignment_tier`: Tier producing the decision (`tier_1_active`, `tier_2_lookahead`, or `tier_3_unassigned`).
+  * `metrics_at_assignment`: Evaluation metrics snapshot containing selected agent's `weekly_capacity`, `weekly_workload`, `effective_remaining_capacity`, `projected_utilization`, `rolling_utilization`, and total `eligible_candidates_count`.
+  * `reason`: Human-readable text summary detailing why the agent was selected or why the ticket remained unassigned.
 
 ---
 
