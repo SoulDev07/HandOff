@@ -93,7 +93,16 @@ Receives and resolves tickets.
 Agents set schedules in their local IANA timezone. The engine expands recurring local schedules into concrete UTC shift intervals `(shift_start_utc, shift_end_utc)` to handle daylight saving changes, cross-midnight shifts, and look-ahead evaluations on a unified UTC timeline. If a shift crosses midnight (for example, Monday 22:00 to Tuesday 06:00 local time), it is expanded as a single continuous shift interval starting at `shift_start_utc`. Each agent's weekly capacity is evaluated according to Monday - Sunday in their local timezone. The company timezone defines company-wide workday boundaries and formats real-time coverage on the dashboard.
 
 ### 7.2 Ticket Priority & Effort
-Each priority maps to an estimated effort in hours (for example: P1 = 8h, P3 = 2h). When assigned, ticket effort is allocated entirely to the planning week of the target shift where work begins:
+Every ticket priority maps to a configurable default effort in hours:
+
+| Priority | Label | Default Effort |
+| :--- | :--- | :---: |
+| **P1** | Critical | 8h |
+| **P2** | High | 4h |
+| **P3** | Normal | 2h |
+| **P4** | Low | 1h |
+
+* **Invalid or Missing Priority Handling:** Tickets must specify a valid priority (`P1`, `P2`, `P3`, or `P4`). If a ticket arrives with a missing or invalid priority, the system rejects assignment with a validation error (`400 Bad Request`) and leaves the ticket unassigned with the reason *"Invalid or missing ticket priority: effort cannot be determined."* Defaulting to a lower priority (such as P4) is explicitly prohibited to prevent under-budgeting critical tickets and masking upstream data integration bugs.
 * **Target Shift Week Allocation:** Ticket effort is deducted 100% from the planning week containing the target shift's start date. It is never split across weeks and is not deducted from the arrival week.
 * **Look-Ahead Capacity Budgeting:** Look-ahead eligibility checks evaluate capacity against the target shift's planning week. For example, if a ticket arrives on Friday (Week 1) and is assigned to a Monday shift (Week 2), the entire effort is deducted from Week 2's capacity budget, leaving Week 1 untouched.
 * **Multi-Shift Work:** Ticket effort represents a budget allocation for the target week, not a requirement to finish the ticket within a single shift.
