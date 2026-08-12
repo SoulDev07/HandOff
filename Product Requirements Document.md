@@ -90,7 +90,7 @@ Receives and resolves tickets.
 ## 7. Assignment Model
 
 ### 7.1 Availability & Timezones
-Agents set schedules in their local IANA timezone. The engine expands recurring local schedules into concrete UTC shift intervals `(shift_start_utc, shift_end_utc)` to handle daylight saving changes, cross-midnight shifts, and look-ahead evaluations on a unified UTC timeline. If a shift crosses midnight (for example, Monday 22:00 to Tuesday 06:00 local time), it is expanded as a single continuous shift interval starting at `shift_start_utc`. Each agent's weekly capacity is evaluated according to Monday - Sunday in their local timezone. The company timezone defines company-wide workday boundaries and formats real-time coverage on the dashboard.
+Agents set schedules in their local IANA timezone. The engine expands recurring local schedules into concrete UTC shift intervals `(shift_start_utc, shift_end_utc)` to handle daylight saving changes, cross-midnight shifts, and look-ahead evaluations on a unified UTC timeline. If a shift crosses midnight (for example, Monday 22:00 to Tuesday 06:00 local time), it is expanded as a single continuous shift interval starting at `shift_start_utc`. Each agent's weekly capacity is evaluated according to Monday - Sunday in their local timezone. The company timezone defines company-wide workday boundaries and formats coverage views on the dashboard.
 
 ### 7.2 Ticket Priority & Effort
 Every ticket priority maps to a configurable default effort in hours:
@@ -164,20 +164,53 @@ Routing proceeds through three tiers:
 3. **Tier 3 (Unassigned):** 
    * If no agent has an eligible working shift and sufficient capacity within the 168-hour look-ahead window, leave the ticket unassigned with a recorded reason.
 
-Changes to schedules, timezones, or weekly capacity affect future assignments only. Existing assignments remain unchanged.
+* **Sticky Assignment Scope:** Once a ticket is assigned, the assignment is sticky. Changes to schedules, timezones, or weekly capacity apply strictly to new tickets arriving after the update ("future assignments"). Existing assignments—including tickets assigned via look-ahead to future shifts—remain unchanged and are never automatically re-routed by the engine. Re-assignment requires an explicit manual action by a team lead.
 
 ---
 
-## 9. User Interface & Views
+## 9. User Interface and views
 
-### Coverage Dashboard
-Shows current coverage state:
-* Active vs. scheduled agents.
-* Available capacity by ticket priority.
-* Warnings when capacity is low or exhausted.
+The management interface acts as an operational control center for team leads, mirroring the underlying assignment model (availability, capacity, and utilization metrics).
 
-### Unassigned Tickets Panel
-Lists unassigned tickets alongside the specific reason recorded by the engine.
+### 9.1 Top-level routing health bar
+Surfaces current system state at a glance:
+* **Active vs. Scheduled Agents:** Differentiates between agents currently on shift (`shift_start_utc <= now_utc <= shift_end_utc`) and agents scheduled to work later on the current workday.
+* **Overall System Health Indicator:**
+  * **Healthy (Green):** Active agents working and all ticket priorities (P1–P4) currently covered.
+  * **Limited Capacity (Yellow):** Active agents working, but capacity for critical priorities (for example, P1) is exhausted.
+  * **Future Covered (Orange):** No active agent available now, but an eligible look-ahead shift exists within 7 days.
+  * **Unassignable / No Coverage (Red):** No active or upcoming eligible shift available within 7 days.
+
+### 9.2 Priority capacity matrix
+Answers whether the team can handle new incoming tickets right now:
+* Displays counts of active agents with Effective Remaining Capacity $\ge$ Ticket Effort for each priority (P1 = 8h, P2 = 4h, P3 = 2h, P4 = 1h).
+* Displays the next eligible shift timestamp if current active capacity for a priority level is 0.
+
+### 9.3 Coverage timeline
+Provides a visual timeline of agent shifts and flags two distinct coverage issues:
+* **Schedule Gap:** Time windows where 0 agents are scheduled to work on a company workday.
+* **Capacity Gap:** Time windows where agents are working, but their combined effective capacity is insufficient for higher-priority tickets.
+
+### 9.4 Capacity-first agent table
+Exposes exact agent-level routing metrics:
+* **Agent Status and Schedule:** Shift window, local timezone, and current active status (Working, Away, Unavailable).
+* **Capacity Metrics:** Weekly Capacity, Remaining Weekly Budget, and Effective Remaining Capacity.
+* **Fairness Metrics:** Projected Utilization percentage and 30-Day Rolling Utilization percentage.
+* **Priority Eligibility:** Per-priority eligibility indicators (`P1`, `P2`, `P3`, `P4`) with reasons if restricted (for example: *"Cannot accept P1: 4h effective capacity remaining"*).
+* **Capacity State Categories:** **Healthy** (can accept P1), **Limited** (can accept P3/P4 but not P1), **Exhausted** (effective capacity = 0h), or **Unavailable** (outside shift).
+
+### 9.5 Attention required panel
+Surfaces tickets requiring manual intervention:
+* **Unassigned Tickets Queue:** Lists unassigned tickets alongside evaluation details (why Tier 1, Tier 2, and Tier 3 failed) and plain-language reason strings.
+* **Future Reservation Visibility:** Displays look-ahead capacity reservations for upcoming shifts (`target_shift_start`), showing team leads how future shifts are pre-allocated.
+
+### 9.6 State and threshold definitions
+To guarantee consistent dashboard behavior across implementations, states follow these explicit thresholds:
+* **Active Agent:** Current UTC timestamp falls within expanded shift interval (`shift_start_utc <= now_utc <= shift_end_utc`).
+* **Scheduled Agent:** Agent has a scheduled availability block on the current workday, regardless of whether shift has started.
+* **Coverage Gap (Schedule Gap):** Triggered on a company workday when 0 agents are active (`active_agents == 0`).
+* **Exhausted Capacity:** Agent capacity state where Effective Remaining Capacity is 0h; or priority status where 0 active agents have Effective Remaining Capacity $\ge$ Ticket Effort for that priority.
+* **Low / Limited Capacity:** Agent capacity state where an active agent cannot accept P1 (8h) but can accept lower priorities; or dashboard warning where 0 active agents can accept P1 or team projected utilization exceeds 80%.
 
 ---
 
