@@ -11,7 +11,7 @@
 
 Support agents work across different hours, days, and timezones. When team leads manually route tickets, the process slows down as the team grows.
 
-This product automatically assigns incoming tickets to available agents. It prioritizes quick responses by choosing agents who are working now, while keeping workloads balanced across the team based on capacity.
+This product automatically assigns incoming tickets to available agents. It prioritizes quick responses by choosing agents who can start working the ticket soonest, while keeping workloads balanced across the team based on capacity.
 
 ---
 
@@ -39,7 +39,7 @@ Manual assignment causes several operational problems:
 ### Success Criteria
 * Automatically assign every ticket for which an eligible agent exists within the next 7 days; otherwise leave it unassigned with a clear reason.
 * Off-hours tickets queue to the agent starting work earliest.
-* The dashboard shows coverage gaps and unassigned tickets in real time.
+* The dashboard shows current coverage gaps and unassigned tickets.
 
 ---
 
@@ -49,7 +49,7 @@ Manual assignment causes several operational problems:
 Manages team setup and monitors routing. Responsibilities include:
 * Setting up agent schedules, timezones, and weekly capacity limits.
 * Configuring company workdays, company timezone, and default ticket effort estimates.
-* Monitoring real-time team coverage and capacity bottlenecks.
+* Monitoring team coverage and capacity bottlenecks.
 * Reviewing unassigned tickets and assignment reasons.
 
 ### Support Agent
@@ -90,14 +90,14 @@ Receives and resolves tickets.
 ## 7. Assignment Model
 
 ### 7.1 Availability & Timezones
-Agents set schedules in their local IANA timezone. The engine converts schedules to UTC to handle overnight shifts and daylight saving changes. Weekly planning budgets reset at Monday 00:00 in each agent's local timezone. The company timezone is used to define company-wide workday boundaries and present real-time coverage on the dashboard.
+Agents set schedules in their local IANA timezone. The engine converts schedules to UTC to handle overnight shifts and daylight saving changes. Each agent's weekly capacity is evaluated according to Monday - Sunday in their local timezone. The company timezone is used to define company-wide workday boundaries and present real-time coverage on the dashboard.
 
 ### 7.2 Ticket Priority & Effort
 Each priority maps to an estimated effort in hours (for example: P1 = 8h, P3 = 2h). When assigned, this effort deducts from the agent's weekly budget for the target planning week. Ticket effort represents a budget allocation and does not require an agent to complete the entire ticket within a single shift.
 
 ### 7.3 Capacity & Workload
 * **Weekly Capacity:** Maximum hours an agent can spend on tickets per week.
-* **Effective Remaining Capacity:** The lower value between remaining weekly capacity and remaining shift hours. For Tier 1 immediate assignment, an agent must have enough effective capacity to cover the ticket effort; otherwise, the ticket shifts to look-ahead routing.
+* **Effective Remaining Capacity:** The lower value between remaining weekly ticket capacity and time-supported remaining capacity, where time-supported capacity is based on the agent's remaining scheduled hours in the planning week and their ticket capacity rate. For Tier 1 immediate assignment, an agent must have enough effective capacity to cover the ticket effort; otherwise, the ticket shifts to look-ahead routing.
 
 ### 7.4 Fairness Metrics
 The engine uses percentages rather than raw ticket counts to compare agents fairly:
@@ -116,7 +116,7 @@ Routing proceeds through three tiers:
    * Check agents currently on shift.
    * Filter out agents without enough Effective Remaining Capacity.
    * Select the eligible agent with the lowest Projected Utilization.
-   * If candidate Projected Utilization values are within 10 percentage points of one another, compare their Rolling Utilization and select the candidate with the lower value.
+   * If the difference between the lowest projected utilization and another candidate is ≤ 10 percentage points, those candidates are considered tied. For tied candidates, compare their Rolling Utilization and select the candidate with the lower value.
 
 2. **Tier 2 (7-Day Look-Ahead):** 
    * If no active agent is eligible, evaluate upcoming shifts over the next 7 days.
