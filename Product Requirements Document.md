@@ -93,7 +93,10 @@ Receives and resolves tickets.
 Agents set schedules in their local IANA timezone. The engine converts schedules to UTC to handle overnight shifts and daylight saving changes. Each agent's weekly capacity is evaluated according to Monday - Sunday in their local timezone. The company timezone is used to define company-wide workday boundaries and present real-time coverage on the dashboard.
 
 ### 7.2 Ticket Priority & Effort
-Each priority maps to an estimated effort in hours (for example: P1 = 8h, P3 = 2h). When assigned, this effort deducts from the agent's weekly budget for the target planning week. Ticket effort represents a budget allocation and does not require an agent to complete the entire ticket within a single shift.
+Each priority maps to an estimated effort in hours (for example: P1 = 8h, P3 = 2h). When assigned, ticket effort is allocated entirely to the planning week of the target shift where work begins:
+* **Target Shift Week Allocation:** Ticket effort is deducted 100% from the planning week containing the target shift's start date. It is never split across weeks and is not deducted from the arrival week.
+* **Look-Ahead Capacity Budgeting:** Look-ahead eligibility checks evaluate capacity against the target shift's planning week. For example, if a ticket arrives on Friday (Week 1) and is assigned to a Monday shift (Week 2), the entire effort is deducted from Week 2's capacity budget, leaving Week 1 untouched.
+* **Multi-Shift Work:** Ticket effort represents a budget allocation for the target week, not a requirement to finish the ticket within a single shift.
 
 ### 7.3 Capacity & Workload
 * **Weekly Capacity:** Maximum hours an agent can spend on tickets per week.
@@ -114,6 +117,9 @@ Each priority maps to an estimated effort in hours (for example: P1 = 8h, P3 = 2
 The engine compares agents using percentage utilization rather than raw ticket counts:
 * **Projected Utilization (Short-Term):** Expected workload percentage after taking the ticket:
   $$\text{Projected Utilization} = \frac{\text{Weekly Workload} + \text{Ticket Effort}}{\text{Weekly Ticket Capacity}}$$
+  * **Numerator:** `Weekly Workload + Ticket Effort` (where `Weekly Workload` is the total effort of all tickets assigned to the agent for the target shift's planning week).
+  * **Denominator:** `Weekly Ticket Capacity` (the agent's weekly ticket capacity in hours).
+  * **Target Week Scoping:** Scoped to the planning week containing the target shift. Tier 1 evaluates the current planning week. Look-ahead tiers evaluate the specific planning week to which the target shift belongs. Tickets assigned to future shifts count in their target shift's planning week budget, not the arrival week.
 * **Rolling Utilization (Long-Term):** Historical workload percentage over the agent's recent working history:
   $$\text{Rolling Utilization} = \frac{\text{Effort Assigned During Rolling Window}}{\text{Capacity Rate} \times \text{Scheduled Hours During Rolling Window}}$$
   * **Window Definition:** Evaluates the agent's previous 30 available working days (calendar dates on which the agent is scheduled to work on a company workday).
@@ -164,7 +170,8 @@ Lists unassigned tickets alongside the specific reason recorded by the engine.
 ## 10. Non-Functional Requirements
 
 * **Determinism:** Given identical inputs, the engine returns the same result. Ties break alphabetically by Agent ID as a last resort.
-* **Concurrency:** Database locks prevent assigning the same ticket twice.
+* **Idempotency:** The `ticket_id` serves as the idempotent request key. Re-delivering or calling the assignment API for an already-assigned `ticket_id` is a no-op that returns the existing assignment details as-is without re-running the assignment algorithm or altering capacity budgets.
+* **Concurrency & Locking:** Assignment operations execute within an isolated database transaction using row-level locking (e.g., `SELECT ... FOR UPDATE` on ticket and assignment records) alongside a database `UNIQUE(ticket_id)` constraint. If multiple workers receive the same `ticket_id` simultaneously, exactly one worker completes the assignment while concurrent requests wait and gracefully return the created assignment via the idempotent no-op path.
 * **Explainability:** Every assignment decision records a plain-text reason.
 
 ---
