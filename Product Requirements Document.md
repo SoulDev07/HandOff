@@ -110,11 +110,12 @@ Every ticket priority maps to a configurable default effort in hours:
 ### 7.3 Capacity & Workload
 * **Weekly Capacity:** Maximum hours an agent can spend on tickets per week.
 * **Weekly Workload:** Sum of estimated effort (in hours) of all tickets assigned to the agent for the target planning week (regardless of status).
+* **Unresolved Tickets Across Week Boundaries (Non-Rollover Rule):** Ticket effort represents a fixed initial budget allocation charged 100% to the target planning week (`target_shift_start`). If a ticket remains unresolved (Open or In Progress) into a subsequent week, its effort remains budgeted in its original target week and does not roll over into the new week's capacity budget. The new week starts with a fresh capacity budget. Unresolved tickets continue to be tracked under `Active Workload` for operational visibility on the dashboard, but do not reduce future weekly capacity budgets. Effort is only removed if a ticket is explicitly cancelled or unassigned by a team lead.
 * **Remaining Weekly Budget:** Hours left in the agent's weekly ticket capacity:
   $$\text{Remaining Weekly Budget} = \text{Weekly Ticket Capacity} - \text{Weekly Workload}$$
-* **Capacity Rate:** The proportion of scheduled shift hours dedicated to ticket work:
-  $$\text{Capacity Rate} = \frac{\text{Weekly Ticket Capacity}}{\text{Total Scheduled Availability Hours}}$$
-  If total scheduled hours or ticket capacity is 0, Capacity Rate is 0.
+* **Capacity Rate:** The proportion of scheduled shift hours dedicated to ticket work, capped at 1.0:
+  $$\text{Capacity Rate} = \min\left(1.0, \frac{\text{Weekly Ticket Capacity}}{\text{Total Scheduled Availability Hours}}\right)$$
+  Capping the Capacity Rate at 1.0 ensures that Capacity Rate represents a valid proportion of scheduled shift time ($\le 100\%$). An agent cannot dedicate more time to ticket work during a shift than the shift's actual physical duration. If total scheduled hours or ticket capacity is 0, Capacity Rate is 0.
 * **Time-Supported Remaining Capacity:** Ticket work that fits into the agent's remaining shift hours:
   $$\text{Time-Supported Remaining Capacity} = \text{Remaining Scheduled Shift Hours} \times \text{Capacity Rate}$$
 * **Effective Remaining Capacity:** The lower value between remaining weekly capacity and time-supported capacity:
