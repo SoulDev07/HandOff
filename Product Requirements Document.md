@@ -164,34 +164,55 @@ Routing proceeds through three tiers:
 3. **Tier 3 (Unassigned):** 
    * If no agent has an eligible working shift and sufficient capacity within the 168-hour look-ahead window, leave the ticket unassigned with a recorded reason.
 
-* **Sticky Assignment Scope:** Once a ticket is assigned, the assignment is sticky. Changes to schedules, timezones, or weekly capacity apply strictly to new tickets arriving after the update ("future assignments"). Existing assignments—including tickets assigned via look-ahead to future shifts—remain unchanged and are never automatically re-routed by the engine. Re-assignment requires an explicit manual action by a team lead.
+* **Sticky Assignment Scope:** Once a ticket is assigned, the assignment is sticky. Changes to schedules, timezones, or weekly capacity apply strictly to new tickets arriving after the update ("future assignments"). Existing assignments (including tickets assigned via look-ahead to future shifts) remain unchanged and are never automatically re-routed by the engine. Re-assignment requires an explicit manual action by a team lead.
 
 ---
 
 ## 9. User Interface and views
 
-The management interface acts as an operational control center for team leads, mirroring the underlying assignment model (availability, capacity, and utilization metrics).
+The management interface acts as both a configuration portal and an operational control center for team leads.
 
-### 9.1 Top-level routing health bar
+### 9.1 Configuration & Management Workflows
+
+#### 9.1.1 Agent Roster & Capacity Management
+* **Add Agent Flow:** Modal/form requiring Agent Name, local IANA Timezone (searchable dropdown, for example `Asia/Kolkata`), and Weekly Ticket Capacity in hours (the system automatically generates a unique `agent_id`).
+* **Edit Agent Flow:** Form to update an agent's timezone, weekly ticket capacity, or personal details.
+* **Agent Deactivation (Soft-Delete):** Setting an agent's status to `Inactive`. Inactive agents are immediately excluded from Tier 1 and Tier 2 routing algorithms. Historical assignment records, audit logs, and rolling utilization history remain fully preserved.
+* **Independent Capacity Setting:** Weekly Ticket Capacity and Availability Schedule are configured independently without imposing artificial constraints (for example, senior agents can be assigned higher weekly ticket capacity than scheduled shift hours).
+
+#### 9.1.2 Agent Schedule Builder
+* **Weekly Schedule Grid:** Per-day availability builder (Monday through Sunday) configured in the agent's local IANA timezone.
+* **Daily Shift Window:** Each day toggles `On` or `Off`. When active, sets a single contiguous shift window (`Start Time` and `End Time`).
+
+#### 9.1.3 Company Settings View
+* **Company Workdays:** Checkboxes to select active operating days for the company pool (for example, Monday through Friday).
+* **Company Timezone:** Searchable dropdown setting the primary company timezone used for dashboard formatting and workday boundaries.
+* **Priority Effort Mapping:** Configurable number inputs setting default estimated effort in hours for each priority level (P1 = 8h, P2 = 4h, P3 = 2h, P4 = 1h).
+
+---
+
+### 9.2 Operations Control Center (Coverage Dashboard)
+
+#### 9.2.1 Top-level routing health bar
 Surfaces current system state at a glance:
 * **Active vs. Scheduled Agents:** Differentiates between agents currently on shift (`shift_start_utc <= now_utc <= shift_end_utc`) and agents scheduled to work later on the current workday.
 * **Overall System Health Indicator:**
-  * **Healthy (Green):** Active agents working and all ticket priorities (P1–P4) currently covered.
+  * **Healthy (Green):** Active agents working and all ticket priorities (P1 to P4) currently covered.
   * **Limited Capacity (Yellow):** Active agents working, but capacity for critical priorities (for example, P1) is exhausted.
   * **Future Covered (Orange):** No active agent available now, but an eligible look-ahead shift exists within 7 days.
   * **Unassignable / No Coverage (Red):** No active or upcoming eligible shift available within 7 days.
 
-### 9.2 Priority capacity matrix
+#### 9.2.2 Priority capacity matrix
 Answers whether the team can handle new incoming tickets right now:
 * Displays counts of active agents with Effective Remaining Capacity $\ge$ Ticket Effort for each priority (P1 = 8h, P2 = 4h, P3 = 2h, P4 = 1h).
 * Displays the next eligible shift timestamp if current active capacity for a priority level is 0.
 
-### 9.3 Coverage timeline
+#### 9.2.3 Coverage timeline
 Provides a visual timeline of agent shifts and flags two distinct coverage issues:
 * **Schedule Gap:** Time windows where 0 agents are scheduled to work on a company workday.
 * **Capacity Gap:** Time windows where agents are working, but their combined effective capacity is insufficient for higher-priority tickets.
 
-### 9.4 Capacity-first agent table
+#### 9.2.4 Capacity-first agent table
 Exposes exact agent-level routing metrics:
 * **Agent Status and Schedule:** Shift window, local timezone, and current active status (Working, Away, Unavailable).
 * **Capacity Metrics:** Weekly Capacity, Remaining Weekly Budget, and Effective Remaining Capacity.
@@ -199,12 +220,13 @@ Exposes exact agent-level routing metrics:
 * **Priority Eligibility:** Per-priority eligibility indicators (`P1`, `P2`, `P3`, `P4`) with reasons if restricted (for example: *"Cannot accept P1: 4h effective capacity remaining"*).
 * **Capacity State Categories:** **Healthy** (can accept P1), **Limited** (can accept P3/P4 but not P1), **Exhausted** (effective capacity = 0h), or **Unavailable** (outside shift).
 
-### 9.5 Attention required panel
+#### 9.2.5 Attention required panel
 Surfaces tickets requiring manual intervention:
-* **Unassigned Tickets Queue:** Lists unassigned tickets alongside evaluation details (why Tier 1, Tier 2, and Tier 3 failed) and plain-language reason strings.
+* **Unassigned Tickets Queue:** Lists unassigned tickets alongside evaluation details (why Tier 1, Tier 2, and Tier 3 failed), plain-language reason strings, and a **"Retry Assignment" / "Re-run Routing" action button**.
+* **Retry Action Flow:** Clicking "Retry Assignment" triggers `POST /companies/{company_id}/tickets/{ticket_id}/assignment`. If an agent has since logged in or gained capacity, the ticket transitions to `assigned`. If still unassigned, the UI updates the reason string with the latest evaluation result.
 * **Future Reservation Visibility:** Displays look-ahead capacity reservations for upcoming shifts (`target_shift_start`), showing team leads how future shifts are pre-allocated.
 
-### 9.6 State and threshold definitions
+#### 9.2.6 State and threshold definitions
 To guarantee consistent dashboard behavior across implementations, states follow these explicit thresholds:
 * **Active Agent:** Current UTC timestamp falls within expanded shift interval (`shift_start_utc <= now_utc <= shift_end_utc`).
 * **Scheduled Agent:** Agent has a scheduled availability block on the current workday, regardless of whether shift has started.
@@ -214,25 +236,98 @@ To guarantee consistent dashboard behavior across implementations, states follow
 
 ---
 
-## 10. Non-Functional Requirements
+## 10. API Contract Specification
+
+### 10.1 Endpoint Definition
+```http
+POST /companies/{company_id}/tickets/{ticket_id}/assignment
+```
+
+### 10.2 Request & Priority Resolution
+* **Path Parameters:** `company_id` (string/UUID), `ticket_id` (string/UUID).
+* **Priority Source:** The engine loads the pre-created ticket record from the database using `ticket_id` to retrieve its `company_id`, `priority`, and `created_at_utc`. If a request payload is provided, its `priority` must match the ticket record.
+* **Priority Validation:** Ticket priority must be valid (`P1`, `P2`, `P3`, or `P4`).
+
+### 10.3 Response Schemas
+
+#### A. Assigned Ticket Response (`200 OK`)
+```json
+{
+  "ticket_id": "ticket_123",
+  "company_id": "company_abc",
+  "status": "assigned",
+  "assigned_agent_id": "agent_42",
+  "assigned_agent_name": "Ananya",
+  "assigned_at": "2026-08-13T10:30:00Z",
+  "target_shift_start": "2026-08-13T10:30:00Z",
+  "assignment_tier": "tier_1_active",
+  "metrics_at_assignment": {
+    "weekly_capacity": 32.0,
+    "weekly_workload": 12.0,
+    "effective_remaining_capacity": 9.6,
+    "projected_utilization": 0.625,
+    "rolling_utilization": 0.58,
+    "eligible_candidates_count": 3
+  },
+  "reason": "Assigned to Ananya: lowest projected utilization (62.5%) among 3 eligible active candidates."
+}
+```
+
+#### B. Unassigned Ticket Response (`200 OK`)
+```json
+{
+  "ticket_id": "ticket_125",
+  "company_id": "company_abc",
+  "status": "unassigned",
+  "assigned_agent_id": null,
+  "assigned_agent_name": null,
+  "assigned_at": "2026-08-13T10:30:00Z",
+  "target_shift_start": null,
+  "assignment_tier": "tier_3_unassigned",
+  "metrics_at_assignment": {
+    "weekly_capacity": null,
+    "weekly_workload": null,
+    "effective_remaining_capacity": null,
+    "projected_utilization": null,
+    "rolling_utilization": null,
+    "eligible_candidates_count": 0
+  },
+  "reason": "Unassigned: 0 eligible candidates found within the 168-hour look-ahead window."
+}
+```
+
+#### C. Error Responses
+* **`404 Not Found`:** Returned when `ticket_id` or `company_id` does not exist in the database.
+```json
+{
+  "error": "NOT_FOUND",
+  "message": "Ticket ticket_999 or Company company_abc not found."
+}
+```
+* **`400 Bad Request`:** Returned when ticket priority is missing, invalid (not P1 to P4), or `company_id` mismatches.
+```json
+{
+  "error": "VALIDATION_ERROR",
+  "message": "Invalid or missing ticket priority: effort cannot be determined."
+}
+```
+
+### 10.4 Idempotency & Retry Contract
+* **Retrying an `assigned` Ticket:** Calling the endpoint for a ticket that has already been successfully assigned returns the existing assignment payload (`200 OK`) as an **idempotent no-op**. It does not re-run routing algorithms or alter capacity budgets.
+* **Retrying an `unassigned` Ticket:** Calling the endpoint for a ticket whose previous evaluation returned `unassigned` **re-evaluates routing against current system state**. This allows retry jobs or UI "Retry Assignment" clicks to successfully assign tickets once agents log in or gain capacity.
+
+---
+
+## 11. Non-Functional Requirements
 
 * **Determinism:** Given identical inputs, the engine returns the same result. Ties break alphabetically by Agent ID as a last resort.
 * **Idempotency:** The `ticket_id` serves as the idempotent request key. Re-delivering or calling the assignment API for an already-assigned `ticket_id` is a no-op that returns the existing assignment details as-is without re-running the assignment algorithm or altering capacity budgets.
 * **Concurrency & Locking:** Assignment operations execute within an isolated database transaction using row-level locking (e.g., `SELECT ... FOR UPDATE` on ticket and assignment records) alongside a database `UNIQUE(ticket_id)` constraint. If multiple workers receive the same `ticket_id` simultaneously, exactly one worker completes the assignment while concurrent requests wait and gracefully return the created assignment via the idempotent no-op path.
-* **Explainability and Auditability:** Every assignment decision (whether assigned or unassigned) persists a structured audit record containing both machine-readable metrics and a human-readable text explanation:
-  * `ticket_id`: Unique identifier of the evaluated ticket.
-  * `status`: Outcome of assignment evaluation (`assigned` or `unassigned`).
-  * `assigned_agent_id`: Identifier of selected agent (null if unassigned).
-  * `assigned_agent_name`: Name of selected agent (null if unassigned).
-  * `assigned_at`: UTC timestamp when assignment decision was recorded.
-  * `target_shift_start`: UTC timestamp when work is scheduled to begin (equals `assigned_at` for Tier 1 active assignments).
-  * `assignment_tier`: Tier producing the decision (`tier_1_active`, `tier_2_lookahead`, or `tier_3_unassigned`).
-  * `metrics_at_assignment`: Evaluation metrics snapshot containing selected agent's `weekly_capacity`, `weekly_workload`, `effective_remaining_capacity`, `projected_utilization`, `rolling_utilization`, and total `eligible_candidates_count`.
-  * `reason`: Human-readable text summary detailing why the agent was selected or why the ticket remained unassigned.
+* **Explainability and Auditability:** Every assignment decision (whether assigned or unassigned) persists a structured audit record containing both machine-readable metrics and a human-readable text explanation.
 
 ---
 
-## 11. Future Improvements
+## 12. Future Improvements
 * Emergency manual overrides for critical tickets.
 * PTO and holiday calendar integration.
 * Split-shift schedule support.
