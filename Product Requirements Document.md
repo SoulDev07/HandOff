@@ -190,6 +190,14 @@ The management interface acts as both a configuration portal and an operational 
 * **Company Timezone:** Searchable dropdown setting the primary company timezone used for dashboard formatting and workday boundaries.
 * **Priority Effort Mapping:** Configurable number inputs setting default estimated effort in hours for each priority level (P1 = 8h, P2 = 4h, P3 = 2h, P4 = 1h).
 
+#### 9.1.4 Manual Ticket Reassignment Flow
+* **Reassignment Action:** The team lead can select any assigned ticket (active or future look-ahead) and click **"Reassign Ticket"**.
+* **Reassignment Modal:** Displays a list of available/scheduled agents evaluated against the ticket's target shift planning week. The lead selects a new assignee (with optional manual capacity override if the lead chooses to over-assign an agent).
+* **Capacity Rebalancing & State Update:** Upon manual reassignment:
+  1. The system **releases** (deducts) the ticket effort from the previous agent's `Weekly Workload` for their target planning week.
+  2. The system **allocates** (adds) the ticket effort to the new agent's `Weekly Workload` for their target planning week, and updates `target_shift_start` to match the new shift.
+  3. A new structured audit record is persisted (`assignment_tier: "manual_reassignment"`, `previous_agent_id`, `new_agent_id`, `reassigned_by_lead: true`, and `reason`).
+
 ---
 
 ### 9.2 Operations Control Center (Coverage Dashboard)
