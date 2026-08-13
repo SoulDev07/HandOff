@@ -92,6 +92,7 @@ Receives and resolves tickets.
 ### 7.1 Availability & Timezones
 Agents set schedules in their local IANA timezone. The engine expands recurring local schedules into concrete UTC shift intervals `(shift_start_utc, shift_end_utc)` to handle daylight saving changes, cross-midnight shifts, and look-ahead evaluations on a unified UTC timeline. If a shift crosses midnight (for example, Monday 22:00 to Tuesday 06:00 local time), it is expanded as a single continuous shift interval starting at `shift_start_utc`. Each agent's weekly capacity is evaluated according to Monday - Sunday in their local timezone. The company timezone defines company-wide workday boundaries and formats coverage views on the dashboard.
 * **168-Hour Window vs. Planning Week:** The 168-hour look-ahead window is a rolling UTC search horizon for finding eligible shifts. It does not define the capacity week. Capacity is always charged to the Monday-Sunday planning week containing `target_shift_start` in the agent's local timezone.
+* **Company Workdays vs. Agent Shift Scope:** Routing eligibility is governed directly by agent shift schedules. Any agent with an active or scheduled shift on their local calendar is eligible for ticket assignment regardless of whether that date falls on a company workday. Company Workdays (configured in Company Settings in the company timezone) are used by the Operations Control Center for dashboard coverage reporting and flagging Scheduled Coverage Gaps.
 
 ### 7.2 Ticket Priority & Effort
 Every ticket priority maps to a configurable default effort in hours:
@@ -104,6 +105,7 @@ Every ticket priority maps to a configurable default effort in hours:
 | **P4** | Low | 1h |
 
 * **Invalid or Missing Priority Handling:** Tickets must specify a valid priority (`P1`, `P2`, `P3`, or `P4`). If a ticket arrives with a missing or invalid priority, the system rejects assignment with a validation error (`400 Bad Request`) and leaves the ticket unassigned with the reason *"Invalid or missing ticket priority: effort cannot be determined."* Defaulting to a lower priority (such as P4) is explicitly prohibited to prevent under-budgeting critical tickets and masking upstream data integration bugs.
+* **Effort Snapshotting at Creation Time:** When a ticket is created or ingested into the system, its estimated effort in hours is permanently snapshotted onto the ticket record (`ticket.effort_hours = priority_effort_mapping[priority]`). Updating priority effort mappings in Company Settings applies strictly to new tickets created after the change. Existing tickets retain their snapshotted effort, preserving historical workload, rolling utilization, and audit logs.
 * **Target Shift Week Allocation:** Ticket effort is deducted 100% from the planning week containing the target shift's start date. It is never split across weeks and is not deducted from the arrival week.
 * **Look-Ahead Capacity Budgeting:** Look-ahead eligibility checks evaluate capacity against the target shift's planning week. For example, if a ticket arrives on Friday (Week 1) and is assigned to a Monday shift (Week 2), the entire effort is deducted from Week 2's capacity budget, leaving Week 1 untouched.
 * **Multi-Shift Work:** Ticket effort represents a budget allocation for the target week, not a requirement to finish the ticket within a single shift.
@@ -119,9 +121,10 @@ Every ticket priority maps to a configurable default effort in hours:
   Because form validation enforces `Weekly Ticket Capacity <= Total Scheduled Availability Hours`, the Capacity Rate is naturally bounded to $[0.0, 1.0]$. If total scheduled hours or ticket capacity is 0, Capacity Rate is 0.
 * **Time-Supported Remaining Capacity:** Ticket work that fits into the agent's remaining shift hours:
   $$\text{Time-Supported Remaining Capacity} = \text{Remaining Scheduled Shift Hours} \times \text{Capacity Rate}$$
-* **Effective Remaining Capacity:** The lower value between remaining weekly capacity and time-supported capacity:
-  $$\text{Effective Remaining Capacity} = \min(\text{Remaining Weekly Budget}, \text{Time-Supported Remaining Capacity})$$
-  For Tier 1 immediate assignment, an agent's effective remaining capacity must be greater than or equal to the ticket effort; otherwise, the ticket shifts to look-ahead routing.
+* **Tier 2 Look-Ahead Shift Duration:** For Tier 2 look-ahead evaluations on future shifts that have not yet started, `Remaining Scheduled Shift Hours` equals the **Full Scheduled Duration** of that future shift (for example, 8.0 hours for a full 09:00 to 17:00 shift).
+* **Effective Remaining Capacity & Clamping:** The lower value between remaining weekly capacity and time-supported capacity, clamped to non-negative values for routing eligibility:
+  $$\text{Effective Remaining Capacity} = \max\left(0.0, \min(\text{Remaining Weekly Budget}, \text{Time-Supported Remaining Capacity})\right)$$
+  If manual reassignment pushes an agent's `Weekly Workload` above their `Weekly Ticket Capacity`, their `Remaining Weekly Budget` becomes negative (for example, -6.0h). Clamping ensures effective capacity evaluates to `0.0h`, safely excluding over-capacity agents from automatic routing without corrupting downstream math.
 * **Partial and Zero Hours Handling:** Calculations preserve exact fractional hours (for example, 2.5 remaining shift hours at a 0.8 capacity rate yields 2.0 hours of time-supported capacity). If an agent has 0 weekly capacity or 0 scheduled hours, effective capacity is 0, rendering the agent ineligible for assignment.
 
 ### 7.4 Fairness Metrics
@@ -156,10 +159,10 @@ Routing proceeds through three tiers:
    * Check agents currently on shift.
    * Filter out agents without enough Effective Remaining Capacity.
    * Select the eligible agent with the lowest Projected Utilization.
-   * If the difference between the lowest projected utilization and another candidate is ≤ 10 percentage points, those candidates are considered tied. For tied candidates, compare their Rolling Utilization and select the candidate with the lower value.
+   * **Minimum-Anchored Tie Band:** Candidates are considered tied if `Candidate Projected Utilization - Minimum Candidate Projected Utilization <= 0.10` (10 percentage points). For tied candidates, compare their Rolling Utilization and select the candidate with the lower value. This minimum-anchored definition ensures tie-band evaluation is transitive, single-pass, and completely deterministic across implementations.
 
 2. **Tier 2 (7-day look-ahead):** 
-   * If no active agent is eligible, evaluate upcoming shifts starting within the 168-hour UTC look-ahead window (`ticket_created_at_utc` to `ticket_created_at_utc + 168h`).
+   * If no active agent is eligible, evaluate upcoming shifts starting within the 168-hour UTC look-ahead window (`ticket_created_at_utc` to `ticket_created_at_utc + 168h`). Time-supported capacity evaluates using the full scheduled shift duration of the future shift.
    * Assign to the eligible agent whose shift starts earliest.
    * If multiple eligible agents share the same earliest shift start, use Projected Utilization and Rolling Utilization to select between them.
 
@@ -333,7 +336,7 @@ POST /companies/{company_id}/tickets/{ticket_id}/assignment
 
 * **Determinism:** Given identical inputs, the engine returns the same result. Ties break alphabetically by Agent ID as a last resort.
 * **Idempotency:** The `(company_id, ticket_id)` pair uniquely identifies an assignment request. Re-delivering or calling the assignment API for an already-assigned ticket is a no-op that returns the existing assignment details without re-running the assignment algorithm or altering capacity budgets.
-* **Concurrency & Locking:** Assignment operations execute within an isolated database transaction using row-level locking on ticket and assignment records alongside a database `UNIQUE(company_id, ticket_id)` constraint. If multiple workers receive the same ticket simultaneously, exactly one worker completes the assignment while concurrent requests wait and gracefully return the created assignment via the idempotent no-op path.
+* **Concurrency & Locking:** Assignment operations execute within an isolated database transaction using row-level locking on ticket, assignment, and candidate agent capacity records (e.g., `SELECT ... FOR UPDATE` on company agent rows) alongside a database `UNIQUE(company_id, ticket_id)` constraint. This serializes concurrent assignment operations for the same agent pool, preventing parallel workers from over-allocating an agent.
 * **Explainability and Auditability:** Every assignment decision (whether assigned or unassigned) persists a structured audit record containing both machine-readable metrics and a human-readable text explanation.
 
 ---
