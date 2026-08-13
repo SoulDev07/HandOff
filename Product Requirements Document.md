@@ -2,8 +2,8 @@
 # Support Ticket Assignment
 
 **Status:** Draft
-**Version:** 1.3
-**Last Updated:** 12 August 2026
+**Version:** 1.4
+**Last Updated:** 13 August 2026
 
 ---
 
@@ -91,6 +91,7 @@ Receives and resolves tickets.
 
 ### 7.1 Availability & Timezones
 Agents set schedules in their local IANA timezone. The engine expands recurring local schedules into concrete UTC shift intervals `(shift_start_utc, shift_end_utc)` to handle daylight saving changes, cross-midnight shifts, and look-ahead evaluations on a unified UTC timeline. If a shift crosses midnight (for example, Monday 22:00 to Tuesday 06:00 local time), it is expanded as a single continuous shift interval starting at `shift_start_utc`. Each agent's weekly capacity is evaluated according to Monday - Sunday in their local timezone. The company timezone defines company-wide workday boundaries and formats coverage views on the dashboard.
+* **168-Hour Window vs. Planning Week:** The 168-hour look-ahead window is a rolling UTC search horizon for finding eligible shifts. It does not define the capacity week. Capacity is always charged to the Monday-Sunday planning week containing `target_shift_start` in the agent's local timezone.
 
 ### 7.2 Ticket Priority & Effort
 Every ticket priority maps to a configurable default effort in hours:
@@ -108,14 +109,14 @@ Every ticket priority maps to a configurable default effort in hours:
 * **Multi-Shift Work:** Ticket effort represents a budget allocation for the target week, not a requirement to finish the ticket within a single shift.
 
 ### 7.3 Capacity & Workload
-* **Weekly Capacity:** Maximum hours an agent can spend on tickets per week.
+* **Weekly Capacity:** Maximum hours an agent can spend on tickets per week. Form validation enforces `Weekly Ticket Capacity <= Total Scheduled Availability Hours`.
 * **Weekly Workload:** Sum of estimated effort (in hours) of all tickets assigned to the agent for the target planning week (regardless of status).
-* **Unresolved Tickets Across Week Boundaries (Non-Rollover Rule):** Ticket effort represents a fixed initial budget allocation charged 100% to the target planning week (`target_shift_start`). If a ticket remains unresolved (Open or In Progress) into a subsequent week, its effort remains budgeted in its original target week and does not roll over into the new week's capacity budget. The new week starts with a fresh capacity budget. Unresolved tickets continue to be tracked under `Active Workload` for operational visibility on the dashboard, but do not reduce future weekly capacity budgets. Effort is only removed if a ticket is explicitly cancelled or unassigned by a team lead.
+* **Unresolved Tickets Across Week Boundaries (Non-Rollover Rule):** Ticket effort represents a fixed initial budget allocation charged 100% to the target planning week (`target_shift_start`). If a ticket remains unresolved (Open or In Progress) into a subsequent week, its effort remains budgeted in its original target week and does not roll over into the new week's capacity budget. The new week starts with a fresh capacity budget. Unresolved tickets continue to be tracked under `Active Workload` for operational visibility on the dashboard, but do not reduce future weekly capacity budgets. The capacity reservation remains until the ticket is cancelled or reassigned. Reassignment transfers the reservation from the old agent/planning week to the new agent/planning week.
 * **Remaining Weekly Budget:** Hours left in the agent's weekly ticket capacity:
   $$\text{Remaining Weekly Budget} = \text{Weekly Ticket Capacity} - \text{Weekly Workload}$$
-* **Capacity Rate:** The proportion of scheduled shift hours dedicated to ticket work, capped at 1.0:
-  $$\text{Capacity Rate} = \min\left(1.0, \frac{\text{Weekly Ticket Capacity}}{\text{Total Scheduled Availability Hours}}\right)$$
-  Capping the Capacity Rate at 1.0 ensures that Capacity Rate represents a valid proportion of scheduled shift time ($\le 100\%$). An agent cannot dedicate more time to ticket work during a shift than the shift's actual physical duration. If total scheduled hours or ticket capacity is 0, Capacity Rate is 0.
+* **Capacity Rate:** The proportion of scheduled shift hours dedicated to ticket work:
+  $$\text{Capacity Rate} = \frac{\text{Weekly Ticket Capacity}}{\text{Total Scheduled Availability Hours}}$$
+  Because form validation enforces `Weekly Ticket Capacity <= Total Scheduled Availability Hours`, the Capacity Rate is naturally bounded to $[0.0, 1.0]$. If total scheduled hours or ticket capacity is 0, Capacity Rate is 0.
 * **Time-Supported Remaining Capacity:** Ticket work that fits into the agent's remaining shift hours:
   $$\text{Time-Supported Remaining Capacity} = \text{Remaining Scheduled Shift Hours} \times \text{Capacity Rate}$$
 * **Effective Remaining Capacity:** The lower value between remaining weekly capacity and time-supported capacity:
@@ -176,10 +177,9 @@ The management interface acts as both a configuration portal and an operational 
 ### 9.1 Configuration & Management Workflows
 
 #### 9.1.1 Agent Roster & Capacity Management
-* **Add Agent Flow:** Modal/form requiring Agent Name, local IANA Timezone (searchable dropdown, for example `Asia/Kolkata`), and Weekly Ticket Capacity in hours (the system automatically generates a unique `agent_id`).
+* **Add Agent Flow:** Modal/form requiring Agent Name, local IANA Timezone (searchable dropdown, for example `Asia/Kolkata`), and Weekly Ticket Capacity in hours (the system automatically generates a unique `agent_id`). Form validation enforces `Weekly Ticket Capacity <= Total Scheduled Availability Hours`.
 * **Edit Agent Flow:** Form to update an agent's timezone, weekly ticket capacity, or personal details.
 * **Agent Deactivation (Soft-Delete):** Setting an agent's status to `Inactive`. Inactive agents are immediately excluded from Tier 1 and Tier 2 routing algorithms. Historical assignment records, audit logs, and rolling utilization history remain fully preserved.
-* **Independent Capacity Setting:** Weekly Ticket Capacity and Availability Schedule are configured independently without imposing artificial constraints (for example, senior agents can be assigned higher weekly ticket capacity than scheduled shift hours).
 
 #### 9.1.2 Agent Schedule Builder
 * **Weekly Schedule Grid:** Per-day availability builder (Monday through Sunday) configured in the agent's local IANA timezone.
@@ -192,11 +192,8 @@ The management interface acts as both a configuration portal and an operational 
 
 #### 9.1.4 Manual Ticket Reassignment Flow
 * **Reassignment Action:** The team lead can select any assigned ticket (active or future look-ahead) and click **"Reassign Ticket"**.
-* **Reassignment Modal:** Displays a list of available/scheduled agents evaluated against the ticket's target shift planning week. The lead selects a new assignee (with optional manual capacity override if the lead chooses to over-assign an agent).
-* **Capacity Rebalancing & State Update:** Upon manual reassignment:
-  1. The system **releases** (deducts) the ticket effort from the previous agent's `Weekly Workload` for their target planning week.
-  2. The system **allocates** (adds) the ticket effort to the new agent's `Weekly Workload` for their target planning week, and updates `target_shift_start` to match the new shift.
-  3. A new structured audit record is persisted (`assignment_tier: "manual_reassignment"`, `previous_agent_id`, `new_agent_id`, `reassigned_by_lead: true`, and `reason`).
+* **Reassignment Modal:** Displays a list of available/scheduled agents evaluated against the ticket's target shift planning week. By default, the modal shows agents with available capacity. The team lead may enable **"Override Capacity"** to assign the ticket to an over-capacity agent. The UI displays the resulting over-capacity amount and requires explicit confirmation.
+* **Capacity Reservation Transfer & Audit Log:** Reassignment removes the ticket's capacity reservation from the previous agent's target planning week, creates a new reservation for the new agent in their target planning week, updates `assigned_agent_id` and `target_shift_start`, and records a structured audit log (`assignment_tier: "manual_reassignment"`, `previous_agent_id`, `new_agent_id`, `reassigned_by_lead: true`, `manual_capacity_override: boolean`, and `reason`).
 
 ---
 
@@ -227,7 +224,8 @@ Exposes exact agent-level routing metrics:
 * **Capacity Metrics:** Weekly Capacity, Remaining Weekly Budget, and Effective Remaining Capacity.
 * **Fairness Metrics:** Projected Utilization percentage and 30-Day Rolling Utilization percentage.
 * **Priority Eligibility:** Per-priority eligibility indicators (`P1`, `P2`, `P3`, `P4`) with reasons if restricted (for example: *"Cannot accept P1: 4h effective capacity remaining"*).
-* **Capacity State Categories:** **Healthy** (can accept P1), **Limited** (can accept P3/P4 but not P1), **Exhausted** (effective capacity = 0h), or **Unavailable** (outside shift).
+* **Agent Capacity States:** **Healthy** (can accept P1), **Limited** (can accept P3/P4 but not P1), **Exhausted** (effective capacity = 0h), or **Unavailable** (outside shift).
+* **Team Capacity Warning:** Surfaces team-level warnings: **None** (normal operation) or **High Utilization Warning** (team projected utilization exceeds 80%).
 
 #### 9.2.5 Attention required panel
 Surfaces tickets requiring manual intervention:
@@ -238,13 +236,14 @@ Surfaces tickets requiring manual intervention:
 #### 9.2.6 State and threshold definitions
 To guarantee consistent dashboard behavior across implementations, states follow these explicit thresholds:
 * **Dashboard Planning Window:** Evaluates the 168-hour UTC window starting from the current timestamp (`now_utc` to `now_utc + 168h`).
-* **Active Agent:** Current UTC timestamp falls within expanded shift interval (`shift_start_utc <= now_utc <= shift_end_utc`).
+* **Active Agent:** Current UTC timestamp falls within expanded shift interval (`shift_start_utc <= now_utc < shift_end_utc`).
 * **Scheduled Agent:** Agent has a scheduled availability block on the current workday, regardless of whether shift has started.
 * **No Active Coverage State:** Current-time condition where `active_agents == 0` at `now_utc`. Indicates no agent is currently working right now (does not necessarily mean a schedule gap exists, as shifts may start later today).
 * **Scheduled Coverage Gap:** A time interval within the 168-hour planning window during which 0 agents are scheduled to work on a company workday.
 * **Capacity Gap:** A time interval where agents are scheduled or active, but 0 eligible agents have Effective Remaining Capacity $\ge$ Ticket Effort for a given priority.
 * **Exhausted Capacity:** Agent capacity state where Effective Remaining Capacity is 0h; or priority status where 0 active agents have Effective Remaining Capacity $\ge$ Ticket Effort for that priority.
-* **Low / Limited Capacity:** Agent capacity state where an active agent cannot accept P1 (8h) but can accept lower priorities; or dashboard warning where 0 active agents can accept P1 or team projected utilization exceeds 80%.
+* **Low / Limited Capacity:** Agent capacity state where an active agent cannot accept P1 (8h) but can accept lower priorities.
+* **High Utilization Warning:** Dashboard warning triggered when team projected utilization exceeds 80%.
 
 ---
 
@@ -256,9 +255,9 @@ POST /companies/{company_id}/tickets/{ticket_id}/assignment
 ```
 
 ### 10.2 Request & Priority Resolution
-* **Path Parameters:** `company_id` (string/UUID), `ticket_id` (string/UUID).
-* **Priority Source:** The engine loads the pre-created ticket record from the database using `ticket_id` to retrieve its `company_id`, `priority`, and `created_at_utc`. If a request payload is provided, its `priority` must match the ticket record.
-* **Priority Validation:** Ticket priority must be valid (`P1`, `P2`, `P3`, or `P4`).
+* **Path Parameters:** `company_id` (string/UUID), `ticket_id` (string/UUID). The endpoint accepts path parameters and does not take a JSON request body.
+* **Priority Source:** The assignment service loads the ticket belonging to the specified company from the database using `ticket_id` and reads its stored `priority` and `created_at_utc`. The caller cannot override priority during assignment.
+* **Priority Validation:** Stored ticket priority must be valid (`P1`, `P2`, `P3`, or `P4`).
 
 ### 10.3 Response Schemas
 
@@ -309,14 +308,14 @@ POST /companies/{company_id}/tickets/{ticket_id}/assignment
 ```
 
 #### C. Error Responses
-* **`404 Not Found`:** Returned when `ticket_id` or `company_id` does not exist in the database.
+* **`404 Not Found`:** Returned when the company does not exist, the ticket does not exist, or the ticket does not belong to the specified company (ensuring multi-tenant security).
 ```json
 {
   "error": "NOT_FOUND",
   "message": "Ticket ticket_999 or Company company_abc not found."
 }
 ```
-* **`400 Bad Request`:** Returned when ticket priority is missing, invalid (not P1 to P4), or `company_id` mismatches.
+* **`400 Bad Request`:** Returned when ticket priority is missing or invalid (not P1 to P4).
 ```json
 {
   "error": "VALIDATION_ERROR",
@@ -333,8 +332,8 @@ POST /companies/{company_id}/tickets/{ticket_id}/assignment
 ## 11. Non-Functional Requirements
 
 * **Determinism:** Given identical inputs, the engine returns the same result. Ties break alphabetically by Agent ID as a last resort.
-* **Idempotency:** The `ticket_id` serves as the idempotent request key. Re-delivering or calling the assignment API for an already-assigned `ticket_id` is a no-op that returns the existing assignment details as-is without re-running the assignment algorithm or altering capacity budgets.
-* **Concurrency & Locking:** Assignment operations execute within an isolated database transaction using row-level locking (e.g., `SELECT ... FOR UPDATE` on ticket and assignment records) alongside a database `UNIQUE(ticket_id)` constraint. If multiple workers receive the same `ticket_id` simultaneously, exactly one worker completes the assignment while concurrent requests wait and gracefully return the created assignment via the idempotent no-op path.
+* **Idempotency:** The `(company_id, ticket_id)` pair uniquely identifies an assignment request. Re-delivering or calling the assignment API for an already-assigned ticket is a no-op that returns the existing assignment details without re-running the assignment algorithm or altering capacity budgets.
+* **Concurrency & Locking:** Assignment operations execute within an isolated database transaction using row-level locking on ticket and assignment records alongside a database `UNIQUE(company_id, ticket_id)` constraint. If multiple workers receive the same ticket simultaneously, exactly one worker completes the assignment while concurrent requests wait and gracefully return the created assignment via the idempotent no-op path.
 * **Explainability and Auditability:** Every assignment decision (whether assigned or unassigned) persists a structured audit record containing both machine-readable metrics and a human-readable text explanation.
 
 ---
