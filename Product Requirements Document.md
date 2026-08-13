@@ -209,8 +209,8 @@ Answers whether the team can handle new incoming tickets right now:
 * Displays the next eligible shift timestamp if current active capacity for a priority level is 0.
 
 #### 9.2.3 Coverage timeline
-Provides a visual timeline of agent shifts and flags two distinct coverage issues:
-* **Schedule Gap:** Time windows where 0 agents are scheduled to work on a company workday.
+Provides a visual timeline of agent shifts across a **168-hour planning window** (`now_utc` to `now_utc + 168h`), matching the assignment engine's 7-day look-ahead window. It flags two distinct timeline issues:
+* **Scheduled Coverage Gap:** Time windows within the 168-hour window where 0 agents are scheduled to work on a company workday.
 * **Capacity Gap:** Time windows where agents are working, but their combined effective capacity is insufficient for higher-priority tickets.
 
 #### 9.2.4 Capacity-first agent table
@@ -229,9 +229,12 @@ Surfaces tickets requiring manual intervention:
 
 #### 9.2.6 State and threshold definitions
 To guarantee consistent dashboard behavior across implementations, states follow these explicit thresholds:
+* **Dashboard Planning Window:** Evaluates the 168-hour UTC window starting from the current timestamp (`now_utc` to `now_utc + 168h`).
 * **Active Agent:** Current UTC timestamp falls within expanded shift interval (`shift_start_utc <= now_utc <= shift_end_utc`).
 * **Scheduled Agent:** Agent has a scheduled availability block on the current workday, regardless of whether shift has started.
-* **Coverage Gap (Schedule Gap):** Triggered on a company workday when 0 agents are active (`active_agents == 0`).
+* **No Active Coverage State:** Current-time condition where `active_agents == 0` at `now_utc`. Indicates no agent is currently working right now (does not necessarily mean a schedule gap exists, as shifts may start later today).
+* **Scheduled Coverage Gap:** A time interval within the 168-hour planning window during which 0 agents are scheduled to work on a company workday.
+* **Capacity Gap:** A time interval where agents are scheduled or active, but 0 eligible agents have Effective Remaining Capacity $\ge$ Ticket Effort for a given priority.
 * **Exhausted Capacity:** Agent capacity state where Effective Remaining Capacity is 0h; or priority status where 0 active agents have Effective Remaining Capacity $\ge$ Ticket Effort for that priority.
 * **Low / Limited Capacity:** Agent capacity state where an active agent cannot accept P1 (8h) but can accept lower priorities; or dashboard warning where 0 active agents can accept P1 or team projected utilization exceeds 80%.
 
